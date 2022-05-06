@@ -607,6 +607,8 @@ const ClickFunnelEvents = {
     },
 };
 
+const getQueryDocs = (snapshot) => (snapshot.docs ? snapshot.docs.map((doc) => ({ ...doc.data(), doc_id: doc.id })) : []);
+
 const ipEvents = curry((version, ip) => {
     let q = query(collection(db, "events"), where(version, "==", ip));
     return from(getDocs(q)).pipe(rxmap(getQueryDocs));
