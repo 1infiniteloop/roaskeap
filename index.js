@@ -837,6 +837,7 @@ const Keap = {
             );
 
             let customers_from_cf = from(orders).pipe(
+                rxmap(pipeLog),
                 rxmap(identity),
                 concatMap(identity),
                 concatMap((customer) =>
