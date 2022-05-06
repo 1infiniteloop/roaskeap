@@ -103,7 +103,11 @@ const Facebook = {
                     rxfilter((ad) => !isEmpty(ad)),
                     rxmap(Facebook.ad.details),
                     defaultIfEmpty({}),
-                    catchError((error) => rxof({ ad_id, error: true }))
+                    catchError((error) => {
+                        console.log("Facebook:ad:db:get:error");
+                        console.log(error);
+                        return rxof({ ad_id, error: true });
+                    })
                 );
             },
         },
@@ -133,7 +137,11 @@ const Facebook = {
                         );
                     }),
                     defaultIfEmpty({}),
-                    catchError((error) => rxof({ ad_id, error: true }))
+                    catchError((error) => {
+                        console.log("Facebook:ad:api:get:error");
+                        console.log(error);
+                        return rxof({ ad_id, error: true });
+                    })
                 );
             },
         },
@@ -837,7 +845,6 @@ const Keap = {
             );
 
             let customers_from_cf = from(orders).pipe(
-                rxmap(pipeLog),
                 rxmap(identity),
                 concatMap(identity),
                 concatMap((customer) =>
@@ -973,7 +980,11 @@ const Keap = {
                     date,
                     user_id,
                 })),
-                catchError((error) => rxof(error)),
+                catchError((error) => {
+                    console.log("Keap:report:get:error");
+                    console.log(error);
+                    return rxof(error);
+                }),
                 defaultIfEmpty({ date, customers: {}, user_id })
             );
         },
