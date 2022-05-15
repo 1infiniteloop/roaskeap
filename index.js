@@ -627,10 +627,20 @@ const orders = ({ date, user_id }) => {
     let since = `${moment(date, "YYYY-MM-DD").format("YYYY-MM-DD")}T08:00:00.000Z`;
     let until = `${moment(date, "YYYY-MM-DD").add(1, "days").format("YYYY-MM-DD")}T08:00:00.000Z`;
 
-    return from(getDocs(query(collectionGroup(db, "integrations"), where("account_name", "==", "keap"), where("user_id", "==", user_id)))).pipe(
+    return from(
+        getDocs(
+            query(
+                collectionGroup(db, "integrations"),
+                where("account_name", "==", "keap"),
+                where("user_id", "==", user_id),
+                where("status", "==", 200)
+            )
+        )
+    ).pipe(
         rxmap((data) => data.docs.map((doc) => doc.data())),
         rxmap(loorderby(["created_at"], ["desc"])),
         rxmap(head),
+        rxfilter((value) => !isUndefined(value)),
         concatMap((tokens) => {
             let { access_token } = tokens;
 
@@ -650,9 +660,10 @@ const orders = ({ date, user_id }) => {
                 return rxof([]);
             }
         }),
+        defaultIfEmpty([]),
         catchError((error) => {
             console.log("keap:orders:error");
-            console.log(error.toJSON());
+            console.log(error);
             return rxof([]);
         })
     );
@@ -1095,33 +1106,33 @@ const Keap = {
 let user_id = "aobouNIIRJMSjsDs2dIXAwEKmiY2";
 let date = "2022-05-14";
 
-// from(getDocs(query(collectionGroup(db, "project_accounts"), where("roas_user_id", "==", user_id))))
-//     .pipe(
-//         rxmap(Keap.utilities.queryDocs),
-//         rxmap(lofilter((project) => project.shopping_cart_name !== undefined)),
-//         rxmap(head),
-//         concatMap((project) => {
-//             return from(
-//                 getDocs(query(collectionGroup(db, "integrations"), where("account_name", "==", "facebook"), where("user_id", "==", user_id)))
-//             ).pipe(
-//                 rxmap(Keap.utilities.queryDocs),
-//                 rxmap(head),
-//                 rxmap((facebook) => ({ ...facebook, ...project }))
-//             );
-//         })
-//     )
-//     .subscribe((project) => {
-//         console.log("project");
-//         console.log(project);
+from(getDocs(query(collectionGroup(db, "project_accounts"), where("roas_user_id", "==", user_id))))
+    .pipe(
+        rxmap(Keap.utilities.queryDocs),
+        rxmap(lofilter((project) => project.shopping_cart_name !== undefined)),
+        rxmap(head),
+        concatMap((project) => {
+            return from(
+                getDocs(query(collectionGroup(db, "integrations"), where("account_name", "==", "facebook"), where("user_id", "==", user_id)))
+            ).pipe(
+                rxmap(Keap.utilities.queryDocs),
+                rxmap(head),
+                rxmap((facebook) => ({ ...facebook, ...project }))
+            );
+        })
+    )
+    .subscribe((project) => {
+        console.log("project");
+        console.log(project);
 
-//         let { roas_user_id: user_id, fb_ad_account_id, payment_processor_id, shopping_cart_id } = project;
-//         let payload = { user_id, fb_ad_account_id, payment_processor_id, shopping_cart_id, date };
+        let { roas_user_id: user_id, fb_ad_account_id, payment_processor_id, shopping_cart_id } = project;
+        let payload = { user_id, fb_ad_account_id, payment_processor_id, shopping_cart_id, date };
 
-//         Keap.report.get(payload).subscribe((result) => {
-//             console.log("result");
-//             pipeLog(result);
-//         });
-//     });
+        Keap.report.get(payload).subscribe((result) => {
+            console.log("result");
+            pipeLog(result);
+        });
+    });
 
 const keap_webhook_subscriptions_array = ["subscription.add", "subscription.delete", "subscription.edit", "order.add", "order.edit", "order.delete"];
 
