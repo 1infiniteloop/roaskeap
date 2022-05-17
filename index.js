@@ -2,14 +2,32 @@ const axios = require("axios");
 const { db } = require("./database");
 const { query, where, getDocs, collection, collectionGroup } = require("firebase/firestore");
 const moment = require("moment-timezone");
-const { pick, map, pipe, values, head, identity, of, curry, sum, flatten, not, uniq, toLower, reject, mergeAll, paths } = require("ramda");
+const {
+    pick,
+    map,
+    pipe,
+    values,
+    head,
+    identity,
+    of,
+    curry,
+    sum,
+    flatten,
+    not,
+    uniq,
+    toLower,
+    reject,
+    mergeAll,
+    paths,
+    replace,
+    split,
+} = require("ramda");
 const { size, isUndefined, isEmpty, toNumber, orderBy: lodashorderby, compact, isNil, flattenDeep } = require("lodash");
 const { from, zip, of: rxof, catchError, throwError, iif } = require("rxjs");
 const { concatMap, map: rxmap, filter: rxfilter, reduce: rxreduce, defaultIfEmpty } = require("rxjs/operators");
 const { get, all, mod, matching } = require("shades");
 const { logroupby, lokeyby, louniqby, lofilter, pipeLog, loget, loomitby, isEmail, isIPv4, isIPv6 } = require("helpers");
 const { Facebook: RoasFacebook } = require("roasfacebook");
-const fetch = require("node-fetch");
 
 const loorderby = curry((path, direction, data) => lodashorderby(data, path, direction));
 
@@ -620,6 +638,11 @@ const cfUser = curry((prop, value) => {
     return from(getDocs(q)).pipe(rxmap(getQueryDocs));
 });
 
+const dbUser = curry((prop, value) => {
+    let q = query(collection(db, "events"), where(prop, "==", value));
+    return from(getDocs(q)).pipe(rxmap(getQueryDocs));
+});
+
 const orders = ({ date, user_id }) => {
     let func_name = "Keap:orders";
     console.log(func_name);
@@ -844,6 +867,7 @@ const Keap = {
         get: ({ user_id, date, fb_ad_account_id, payment_processor_id, shopping_cart_id }) => {
             let func_name = `Keap:report:get`;
             console.log(func_name);
+            console.log("shopping_cart_id", shopping_cart_id);
 
             let orders = Keap.orders.get({ payment_processor_id, date, user_id }).pipe(
                 rxmap(logroupby("lower_case_email")),
@@ -857,47 +881,93 @@ const Keap = {
                 })),
                 rxmap(of),
                 rxreducer
+                // rxmap(pipeLog)
             );
 
-            let customers_from_cf = from(orders).pipe(
-                rxmap(identity),
-                concatMap(identity),
+            // return orders;
 
-                concatMap((customer) =>
-                    from(cfUser("email", customer.lower_case_email)).pipe(
-                        concatMap(identity),
-                        rxmap((cfevent) => ({
-                            ad_id: pipe(
-                                compact,
-                                uniq,
-                                reject((id) => id == "%7B%7Bad.id%7D%7D" || id == "{{ad.id}}"),
-                                head
-                            )(ClickFunnelEvents.fb_ad_id.get(cfevent)),
-                            timestamp: pipe(get("updated_at_unix_timestamp"))(cfevent),
-                            ip: pipe(ClickFunnelEvents.ip.get, compact, uniq)(cfevent),
-                            lower_case_email: customer.lower_case_email,
-                        })),
-                        // rxmap(pipeLog),
-                        rxmap(of),
-                        rxreducer,
-                        rxmap(loorderby(["timesamp"], ["desc"])),
-                        // rxmap(pipeLog),
-                        rxmap(get(matching({ ad_id: (id) => !isEmpty(id) }))),
-                        rxmap(louniqby("ad_id")),
-                        rxmap(louniqby("timestamp")),
-                        rxmap((ads) => ({ ...customer, ads })),
-                        rxmap(of)
-                    )
-                ),
-                rxreducer
-            );
+            let customers_from_db;
 
-            customers_from_cf_with_ad_ids = customers_from_cf.pipe(rxmap(get(matching({ ads: (ads) => !isEmpty(ads) }))));
-            customers_from_cf_without_ad_ids = customers_from_cf.pipe(rxmap(get(matching({ ads: (ads) => isEmpty(ads) }))));
+            if (shopping_cart_id == "keap") {
+                customers_from_db = from(orders).pipe(
+                    rxmap(identity),
+                    concatMap(identity),
+                    concatMap((customer) =>
+                        from(dbUser("inf_field_Email", pipe(replace("@", "%40"))(customer.email))).pipe(
+                            // concatMap(identity),
+                            rxmap(mod(all)(pick(["ipv4", "ipv6"]))),
+                            rxmap(flatten),
+                            rxmap(mod(all)(values)),
+                            rxmap(flatten),
+                            rxmap(uniq),
+                            concatMap(identity),
+                            concatMap((ip_address) => {
+                                return zip([from(ipEvents("ipv4", ip_address)), from(ipEvents("ipv6", ip_address))]).pipe(
+                                    rxmap(flatten),
+                                    concatMap(identity),
+                                    rxmap((event) => ({
+                                        ad_id: pipe(
+                                            paths([["fb_ad_id"], ["h_ad_id"], ["fb_id"], ["ad_id"]]),
+                                            compact,
+                                            mod(all)(pipe(split("%"), head)),
+                                            head
+                                        )(event),
+                                        timestamp: pipe(Event.get_utc_timestamp)(event),
+                                        ip: ip_address,
+                                        lower_case_email: customer.lower_case_email,
+                                    }))
+                                );
+                            }),
+                            rxmap(of),
+                            rxreducer,
+                            rxmap(loorderby(["timesamp"], ["desc"])),
+                            rxmap(get(matching({ ad_id: (id) => !isEmpty(id) }))),
+                            rxmap(louniqby("ad_id")),
+                            rxmap(louniqby("timestamp")),
+                            rxmap((ads) => ({ ...customer, ads })),
+                            rxmap(of)
+                        )
+                    ),
+                    rxreducer
+                );
+            } else {
+                customers_from_db = from(orders).pipe(
+                    rxmap(identity),
+                    concatMap(identity),
+                    concatMap((customer) =>
+                        from(cfUser("email", customer.lower_case_email)).pipe(
+                            concatMap(identity),
+                            rxmap((cfevent) => ({
+                                ad_id: pipe(
+                                    compact,
+                                    uniq,
+                                    reject((id) => id == "%7B%7Bad.id%7D%7D" || id == "{{ad.id}}"),
+                                    head
+                                )(ClickFunnelEvents.fb_ad_id.get(cfevent)),
+                                timestamp: pipe(get("updated_at_unix_timestamp"))(cfevent),
+                                ip: pipe(ClickFunnelEvents.ip.get, compact, uniq)(cfevent),
+                                lower_case_email: customer.lower_case_email,
+                            })),
+                            rxmap(of),
+                            rxreducer,
+                            rxmap(loorderby(["timesamp"], ["desc"])),
+                            rxmap(get(matching({ ad_id: (id) => !isEmpty(id) }))),
+                            rxmap(louniqby("ad_id")),
+                            rxmap(louniqby("timestamp")),
+                            rxmap((ads) => ({ ...customer, ads })),
+                            rxmap(of)
+                        )
+                    ),
+                    rxreducer
+                );
+            }
+
+            customers_from_db_with_ad_ids = customers_from_db.pipe(rxmap(get(matching({ ads: (ads) => !isEmpty(ads) }))));
+            customers_from_db_without_ad_ids = customers_from_db.pipe(rxmap(get(matching({ ads: (ads) => isEmpty(ads) }))));
 
             // return customers_from_cf_without_ad_ids;
 
-            let customers_from_db_events = customers_from_cf_without_ad_ids.pipe(
+            let customers_from_db_events = customers_from_db_without_ad_ids.pipe(
                 // rxmap(get(all, "email")),
                 concatMap(identity),
                 concatMap((customer) =>
@@ -953,12 +1023,18 @@ const Keap = {
 
             // return customers_from_db_events;
 
-            let customers_from_db_events_with_ips = customers_from_db_events.pipe(rxmap(get(matching({ ads: (ads) => !isEmpty(ads) }))));
-            let customers_from_db_events_without_ips = customers_from_db_events.pipe(rxmap(get(matching({ ads: (ads) => isEmpty(ads) }))));
+            let customers_from_db_events_with_ads = customers_from_db_events.pipe(
+                rxmap(get(matching({ ads: (ads) => !isEmpty(ads) }))),
+                defaultIfEmpty([])
+            );
+            let customers_from_db_events_without_ads = customers_from_db_events.pipe(
+                rxmap(get(matching({ ads: (ads) => isEmpty(ads) }))),
+                defaultIfEmpty([])
+            );
 
-            // return customers_from_db_events_without_ips;
+            // return customers_from_db_events_with_ads;
 
-            return zip([customers_from_cf_with_ad_ids, customers_from_db_events_with_ips, customers_from_db_events_without_ips]).pipe(
+            return zip([customers_from_db_with_ad_ids, customers_from_db_events_with_ads, customers_from_db_events_without_ads]).pipe(
                 rxmap(flattenDeep),
                 concatMap(identity),
                 concatMap((order) => {
@@ -1011,8 +1087,8 @@ const Keap = {
     },
 };
 
-let user_id = "aobouNIIRJMSjsDs2dIXAwEKmiY2";
-let date = "2022-05-17";
+// let user_id = "aobouNIIRJMSjsDs2dIXAwEKmiY2";
+// let date = "2022-05-17";
 
 // from(getDocs(query(collection(db, "projects"), where("roas_user_id", "==", user_id))))
 //     .pipe(
