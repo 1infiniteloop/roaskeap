@@ -669,102 +669,6 @@ const orders = ({ date, user_id }) => {
     );
 };
 
-const Hooks = {
-    list: (user_id) => {
-        let func_name = "Hooks:list";
-        console.log(func_name);
-
-        let access_token_docs = getDocs(
-            query(collectionGroup(db, "integrations"), where("account_name", "==", "keap"), where("user_id", "==", user_id))
-        );
-
-        let config = (access_token) => {
-            return {
-                method: "get",
-                url: `https://api.infusionsoft.com/crm/rest/v1/hooks/event_keys`,
-                headers: {
-                    Authorization: `Bearer ${access_token}`,
-                },
-            };
-        };
-
-        return from(access_token_docs).pipe(
-            rxmap(Keap.utilities.queryDocs),
-            rxmap(loorderby(["created_at"], ["desc"])),
-            rxmap(head),
-            concatMap((account) => {
-                let { access_token } = account;
-                return from(axios(config(access_token))).pipe(rxmap(get("data")));
-            })
-        );
-    },
-
-    subscribe: (hook_name, user_id) => {
-        let func_name = "Hooks:subscribe";
-        console.log(func_name);
-
-        let access_token_docs = getDocs(
-            query(collectionGroup(db, "integrations"), where("account_name", "==", "keap"), where("user_id", "==", user_id))
-        );
-
-        return from(access_token_docs).pipe(
-            rxmap(Keap.utilities.queryDocs),
-            rxmap(loorderby(["created_at"], ["desc"])),
-            rxmap(head),
-            concatMap((account) => {
-                let { access_token } = account;
-                const body = {
-                    eventKey: hook_name,
-                    roas_hook_url: "https://roas-webhooks-service.herokuapp.com/keap_webhook",
-                    keap_hook_subscription_url: "https://api.infusionsoft.com/crm/rest/v1/hooks",
-                    type: "subscribe",
-                    access_token,
-                    user_id,
-                    hook_name,
-                };
-
-                return from(
-                    fetch(`https://roas-webhooks-service.herokuapp.com/keap_webhook/${user_id}`, {
-                        method: "post",
-                        body: JSON.stringify(body),
-                        headers: { "Content-Type": "application/json", Authorization: `Bearer ${access_token}` },
-                    })
-                );
-            })
-        );
-    },
-
-    verify: (user_id) => {
-        let func_name = "Hooks:verify";
-        console.log(func_name);
-
-        let access_token_docs = getDocs(
-            query(collectionGroup(db, "integrations"), where("account_name", "==", "keap"), where("user_id", "==", user_id))
-        );
-
-        let config = (access_token) => {
-            return {
-                method: "get",
-                url: `https://api.infusionsoft.com/crm/rest/v1/hooks`,
-                headers: {
-                    Authorization: `Bearer ${access_token}`,
-                },
-            };
-        };
-
-        return from(access_token_docs).pipe(
-            rxmap(Keap.utilities.queryDocs),
-            rxmap(loorderby(["created_at"], ["desc"])),
-            rxmap(head),
-            concatMap((account) => {
-                let { access_token } = account;
-
-                return from(axios(config(access_token))).pipe(rxmap(get("data")));
-            })
-        );
-    },
-};
-
 const Keap = {
     utilities: {
         getDates: (startDate, endDate) => {
@@ -958,6 +862,7 @@ const Keap = {
             let customers_from_cf = from(orders).pipe(
                 rxmap(identity),
                 concatMap(identity),
+
                 concatMap((customer) =>
                     from(cfUser("email", customer.lower_case_email)).pipe(
                         concatMap(identity),
@@ -965,15 +870,18 @@ const Keap = {
                             ad_id: pipe(
                                 compact,
                                 uniq,
-                                reject((id) => id == "%7B%7Bad.id%7D%7D"),
+                                reject((id) => id == "%7B%7Bad.id%7D%7D" || id == "{{ad.id}}"),
                                 head
                             )(ClickFunnelEvents.fb_ad_id.get(cfevent)),
                             timestamp: pipe(get("updated_at_unix_timestamp"))(cfevent),
                             ip: pipe(ClickFunnelEvents.ip.get, compact, uniq)(cfevent),
+                            lower_case_email: customer.lower_case_email,
                         })),
+                        // rxmap(pipeLog),
                         rxmap(of),
                         rxreducer,
                         rxmap(loorderby(["timesamp"], ["desc"])),
+                        // rxmap(pipeLog),
                         rxmap(get(matching({ ad_id: (id) => !isEmpty(id) }))),
                         rxmap(louniqby("ad_id")),
                         rxmap(louniqby("timestamp")),
@@ -1103,36 +1011,36 @@ const Keap = {
     },
 };
 
-// let user_id = "aobouNIIRJMSjsDs2dIXAwEKmiY2";
-// let date = "2022-05-14";
+let user_id = "aobouNIIRJMSjsDs2dIXAwEKmiY2";
+let date = "2022-05-17";
 
-// from(getDocs(query(collectionGroup(db, "project_accounts"), where("roas_user_id", "==", user_id))))
-//     .pipe(
-//         rxmap(Keap.utilities.queryDocs),
-//         rxmap(lofilter((project) => project.shopping_cart_name !== undefined)),
-//         rxmap(head),
-//         concatMap((project) => {
-//             return from(
-//                 getDocs(query(collectionGroup(db, "integrations"), where("account_name", "==", "facebook"), where("user_id", "==", user_id)))
-//             ).pipe(
-//                 rxmap(Keap.utilities.queryDocs),
-//                 rxmap(head),
-//                 rxmap((facebook) => ({ ...facebook, ...project }))
-//             );
-//         })
-//     )
-//     .subscribe((project) => {
-//         console.log("project");
-//         console.log(project);
+from(getDocs(query(collection(db, "projects"), where("roas_user_id", "==", user_id))))
+    .pipe(
+        rxmap(Keap.utilities.queryDocs),
+        rxmap(lofilter((project) => project.shopping_cart_name !== undefined)),
+        rxmap(head),
+        concatMap((project) => {
+            return from(
+                getDocs(query(collectionGroup(db, "integrations"), where("account_name", "==", "facebook"), where("user_id", "==", user_id)))
+            ).pipe(
+                rxmap(Keap.utilities.queryDocs),
+                rxmap(head),
+                rxmap((facebook) => ({ ...facebook, ...project }))
+            );
+        })
+    )
+    .subscribe((project) => {
+        console.log("project");
+        console.log(project);
 
-//         let { roas_user_id: user_id, fb_ad_account_id, payment_processor_id, shopping_cart_id } = project;
-//         let payload = { user_id, fb_ad_account_id, payment_processor_id, shopping_cart_id, date };
+        let { roas_user_id: user_id, fb_ad_account_id, payment_processor_id, shopping_cart_id } = project;
+        let payload = { user_id, fb_ad_account_id, payment_processor_id, shopping_cart_id, date };
 
-//         Keap.report.get(payload).subscribe((result) => {
-//             console.log("result");
-//             pipeLog(result);
-//         });
-//     });
+        Keap.report.get(payload).subscribe((result) => {
+            console.log("result");
+            pipeLog(result);
+        });
+    });
 
 const keap_webhook_subscriptions_array = ["subscription.add", "subscription.delete", "subscription.edit", "order.add", "order.edit", "order.delete"];
 
