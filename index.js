@@ -1011,36 +1011,36 @@ const Keap = {
     },
 };
 
-let user_id = "aobouNIIRJMSjsDs2dIXAwEKmiY2";
-let date = "2022-05-17";
+// let user_id = "aobouNIIRJMSjsDs2dIXAwEKmiY2";
+// let date = "2022-05-17";
 
-from(getDocs(query(collection(db, "projects"), where("roas_user_id", "==", user_id))))
-    .pipe(
-        rxmap(Keap.utilities.queryDocs),
-        rxmap(lofilter((project) => project.shopping_cart_name !== undefined)),
-        rxmap(head),
-        concatMap((project) => {
-            return from(
-                getDocs(query(collectionGroup(db, "integrations"), where("account_name", "==", "facebook"), where("user_id", "==", user_id)))
-            ).pipe(
-                rxmap(Keap.utilities.queryDocs),
-                rxmap(head),
-                rxmap((facebook) => ({ ...facebook, ...project }))
-            );
-        })
-    )
-    .subscribe((project) => {
-        console.log("project");
-        console.log(project);
+// from(getDocs(query(collection(db, "projects"), where("roas_user_id", "==", user_id))))
+//     .pipe(
+//         rxmap(Keap.utilities.queryDocs),
+//         rxmap(lofilter((project) => project.shopping_cart_name !== undefined)),
+//         rxmap(head),
+//         concatMap((project) => {
+//             return from(
+//                 getDocs(query(collectionGroup(db, "integrations"), where("account_name", "==", "facebook"), where("user_id", "==", user_id)))
+//             ).pipe(
+//                 rxmap(Keap.utilities.queryDocs),
+//                 rxmap(head),
+//                 rxmap((facebook) => ({ ...facebook, ...project }))
+//             );
+//         })
+//     )
+//     .subscribe((project) => {
+//         console.log("project");
+//         console.log(project);
 
-        let { roas_user_id: user_id, fb_ad_account_id, payment_processor_id, shopping_cart_id } = project;
-        let payload = { user_id, fb_ad_account_id, payment_processor_id, shopping_cart_id, date };
+//         let { roas_user_id: user_id, fb_ad_account_id, payment_processor_id, shopping_cart_id } = project;
+//         let payload = { user_id, fb_ad_account_id, payment_processor_id, shopping_cart_id, date };
 
-        Keap.report.get(payload).subscribe((result) => {
-            console.log("result");
-            pipeLog(result);
-        });
-    });
+//         Keap.report.get(payload).subscribe((result) => {
+//             console.log("result");
+//             pipeLog(result);
+//         });
+//     });
 
 const keap_webhook_subscriptions_array = ["subscription.add", "subscription.delete", "subscription.edit", "order.add", "order.edit", "order.delete"];
 
