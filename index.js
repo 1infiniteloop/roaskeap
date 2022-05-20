@@ -21,9 +21,11 @@ const {
     paths,
     replace,
     split,
+    hasPath,
+    anyPass,
 } = require("ramda");
 const { size, isUndefined, isEmpty, toNumber, orderBy: lodashorderby, compact, isNil, flattenDeep } = require("lodash");
-const { from, zip, of: rxof, catchError, throwError, iif } = require("rxjs");
+const { from, zip, of: rxof, catchError, throwError, iif, tap } = require("rxjs");
 const { concatMap, map: rxmap, filter: rxfilter, reduce: rxreduce, defaultIfEmpty } = require("rxjs/operators");
 const { get, all, mod, matching } = require("shades");
 const { logroupby, lokeyby, louniqby, lofilter, pipeLog, loget, loomitby, isEmail, isIPv4, isIPv6 } = require("helpers");
@@ -205,9 +207,13 @@ const Facebook = {
 
 const Event = {
     ad: {
-        id: ({ fb_ad_id, h_ad_id, ad_id } = {}) => {
+        id: ({ fb_ad_id, h_ad_id, ad_id, fb_id } = {}) => {
             let func_name = `Event:ad:id`;
             console.log(func_name);
+
+            if (fb_id) {
+                console.log("fb_id:", fb_id);
+            }
 
             if (ad_id) {
                 return ad_id;
@@ -254,30 +260,30 @@ const Event = {
     },
 
     get_utc_timestamp: (value) => {
-        console.log("get_utc_timestamp");
+        // console.log("get_utc_timestamp");
 
         let timestamp;
 
         if (get("created_at_unix_timestamp")(value)) {
             timestamp = get("created_at_unix_timestamp")(value);
-            console.log(timestamp);
+            // console.log(timestamp);
             return timestamp;
         }
 
         if (get("utc_unix_time")(value)) {
             let timestamp = get("utc_unix_time")(value);
-            console.log(timestamp);
+            // console.log(timestamp);
             return timestamp;
         }
 
         if (get("utc_iso_datetime")(value)) {
             let timestamp = pipe(get("utc_unix_time"), (value) => moment(value).unix())(value);
-            console.log(timestamp);
+            // console.log(timestamp);
             return timestamp;
         }
 
         timestamp = get("unix_datetime")(value);
-        console.log(timestamp);
+        // console.log(timestamp);
 
         if (!timestamp) {
             console.log("notimestamp");
@@ -628,9 +634,9 @@ const ClickFunnelEvents = {
 
 const getQueryDocs = (snapshot) => (snapshot.docs ? snapshot.docs.map((doc) => ({ ...doc.data(), doc_id: doc.id })) : []);
 
-const ipEvents = curry((version, ip) => {
-    let q = query(collection(db, "events"), where(version, "==", ip));
-    return from(getDocs(q)).pipe(rxmap(getQueryDocs));
+const ipEvents = curry((version, ip, roas_user_id) => {
+    let q = query(collection(db, "events"), where(version, "==", ip), where("roas_user_id", "==", roas_user_id));
+    return from(getDocs(q)).pipe(rxmap(Keap.utilities.queryDocs));
 });
 
 const cfUser = curry((prop, value) => {
@@ -746,6 +752,8 @@ const Keap = {
         rxreducer: rxreduce((prev, curr) => [...prev, ...curr]),
 
         queryDocs: (snapshot) => (snapshot.docs ? snapshot.docs.map((doc) => ({ ...doc.data(), doc_id: doc.id })) : []),
+
+        has_ad_id: anyPass([hasPath(["fb_ad_id"]), hasPath(["h_ad_id"]), hasPath(["fb_id"]), hasPath(["ad_id"])]),
     },
 
     integrations: {
@@ -890,7 +898,7 @@ const Keap = {
 
             if (shopping_cart_id == "keap") {
                 customers_from_db = from(orders).pipe(
-                    rxmap(identity),
+                    rxmap(pipeLog),
                     concatMap(identity),
                     concatMap((customer) =>
                         from(dbUser("inf_field_Email", pipe(replace("@", "%40"))(customer.email))).pipe(
@@ -904,6 +912,9 @@ const Keap = {
                             concatMap((ip_address) => {
                                 return zip([from(ipEvents("ipv4", ip_address)), from(ipEvents("ipv6", ip_address))]).pipe(
                                     rxmap(flatten),
+                                    tap((value) => console.log("size ->", size(value))),
+                                    rxmap(pipe(lofilter(Woocommerce.utilities.has_ad_id))),
+                                    tap((value) => console.log("size <- ", size(value))),
                                     concatMap(identity),
                                     rxmap((event) => ({
                                         ad_id: pipe(
@@ -978,7 +989,7 @@ const Keap = {
                         rxmap(pipe(compact, uniq)),
                         concatMap(identity),
                         concatMap((ip_address) => {
-                            return zip([from(ipEvents("ipv4", ip_address)), from(ipEvents("ipv6", ip_address))]).pipe(
+                            return zip([from(ipEvents("ipv4", ip_address, user_id)), from(ipEvents("ipv6", ip_address, user_id))]).pipe(
                                 rxmap(flatten),
                                 concatMap(identity),
                                 rxmap(paths([["ipv4"], ["ipv6"]])),
@@ -991,15 +1002,18 @@ const Keap = {
                         rxmap(compact),
                         concatMap(identity),
                         concatMap((ip_address) =>
-                            zip([from(ipEvents("ipv4", ip_address)), from(ipEvents("ipv6", ip_address))]).pipe(
+                            zip([from(ipEvents("ipv4", ip_address, user_id)), from(ipEvents("ipv6", ip_address, user_id))]).pipe(
                                 rxmap(flatten),
+                                tap((value) => console.log("size ->", size(value))),
+                                rxmap(pipe(lofilter(Keap.utilities.has_ad_id))),
+                                tap((value) => console.log("size <- ", size(value))),
                                 concatMap(identity),
                                 rxmap((event) => ({
                                     ad_id: pipe(
-                                        paths([["fb_ad_id"], ["h_ad_id"], ["fb_id"]]),
+                                        paths([["fb_ad_id"], ["h_ad_id"], ["fb_id"], ["ad_id"]]),
                                         compact,
                                         uniq,
-                                        reject((id) => id == "%7B%7Bad.id%7D%7D"),
+                                        reject((id) => id == "%7B%7Bad.id%7D%7D" || id == "{{ad.id}}"),
                                         head
                                     )(event),
                                     timestamp: pipe(Event.get_utc_timestamp)(event),
@@ -1088,7 +1102,7 @@ const Keap = {
 };
 
 // let user_id = "aobouNIIRJMSjsDs2dIXAwEKmiY2";
-// let date = "2022-05-17";
+// let date = "2022-05-19";
 
 // from(getDocs(query(collection(db, "projects"), where("roas_user_id", "==", user_id))))
 //     .pipe(
